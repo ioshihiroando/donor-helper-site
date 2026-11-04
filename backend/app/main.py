@@ -1,37 +1,50 @@
+import os
+
+from fastapi.middleware.cors import CORSMiddleware
+
+from datetime import date
+
 from fastapi import (
+    Request,
     FastAPI,
     HTTPException,
     Depends,
     APIRouter,
-    Form,
 )
+
+from fastapi.responses import JSONResponse
+
+from sqlalchemy import or_
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy.orm import Session
-from app.database import get_db
+
+from app.database import get_db, check_database_connection
+
 from app.models import (
     Center,
-    Donation,
-    User,
-    DonorProfile,
     Event,
+    DonationRule,
+    DonationInterval,
 )
+
 from app.schemas import (
     CenterCreate,
-    DonationCreate,
-    UserRegister,
-    UserLogin,
-    TokenResponse,
-    DonorProfileResponse,
-    DonorProfileUpdate,
     EventCreate,
     EventResponse,
+    DonationRuleResponse,
+    DonationRuleCreate,
+    DonationRuleAdminResponse,
+    DonationIntervalMatrixResponse,
+    DonationIntervalMatrixCreate,
 )
-from app.auth import (
-    create_access_token,
-    get_current_user,
-    hash_password,
-    verify_password,
-    get_admin_user,
-)
+
+from app.auth import require_admin_key
+
+FRONTEND_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("FRONTEND_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 app = FastAPI(
     title="Донор-напарник API",
@@ -39,23 +52,101 @@ app = FastAPI(
     version="0.1.0",
 )
 
-auth_router = APIRouter(prefix="/api/auth", tags=["Авторизация"])
-profiles_router = APIRouter(prefix="/api/profiles", tags=["Профиль донора"])
-donations_router = APIRouter(prefix="/api/donations", tags=["Донации"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=FRONTEND_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=["Content-Type"],
+)
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(
+    request: Request,
+    exc: IntegrityError,
+):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": (
+                "Операция нарушает ограничения "
+                "целостности базы данных"
+            )
+        },
+    )
+
+
+@app.exception_handler(SQLAlchemyError)
+async def sqlalchemy_error_handler(
+    request: Request,
+    exc: SQLAlchemyError,
+):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": (
+                "Не удалось выполнить операцию "
+                "с базой данных"
+            )
+        },
+    )
+
 centers_router = APIRouter(prefix="/api/centers", tags=["Центры сдачи крови"])
 events_router = APIRouter(prefix="/api/events", tags=["Мероприятия"])
+rules_router = APIRouter(prefix="/api/rules", tags=["Правила донорства"])
+intervals_router = APIRouter(prefix="/api/donation-intervals", tags=["Интервалы между донациями"])
+
+
+DONATION_TYPES = [
+    {
+        "code": "whole_blood",
+        "name": "Цельная кровь",
+    },
+    {
+        "code": "rbc_1_unit",
+        "name": "Эритроцитная взвесь (1 единица)",
+    },
+    {
+        "code": "rbc_2_units",
+        "name": "Эритроцитная взвесь (2 единицы)",
+    },
+    {
+        "code": "plasma",
+        "name": "Плазма",
+    },
+    {
+        "code": "platelets",
+        "name": "Тромбоциты",
+    },
+    {
+        "code": "granulocytes",
+        "name": "Гранулоциты",
+    },
+]
 
 
 @app.get(
     "/api/health",
-    summary="Проверить состояние API",
+    summary="Проверить состояние backend",
     description=(
-        "Проверяет, запущен ли backend и отвечает ли он на HTTP-запросы. "
-        "Используется для проверки доступности сервера."
+        "Проверяет доступность API и соединение с базой данных."
     ),
 )
 def health_check():
-    return {"status": "ok"}
+    try:
+        check_database_connection()
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="База данных временно недоступна",
+        )
+
+    return {
+        "status": "ok",
+        "database": "connected",
+    }
 
 
 @centers_router.get(
@@ -106,7 +197,7 @@ def get_center(
         "и необязательная ссылка на сайт центра. "
         "При успешном создании возвращает данные центра."
     ),
-    dependencies=[Depends(get_admin_user)],
+    dependencies=[Depends(require_admin_key)],
 )
 def create_center(
     center_data: CenterCreate,
@@ -130,7 +221,7 @@ def create_center(
         "В теле запроса передаются новые данные центра. "
         "Если центр не найден, возвращает ошибку 404."
     ),
-    dependencies=[Depends(get_admin_user)],
+    dependencies=[Depends(require_admin_key)],
 )
 def update_center(
     center_id: int,
@@ -166,7 +257,7 @@ def update_center(
         "Если центр не найден, возвращает ошибку 404. "
         "При успешном удалении возвращает сообщение о результате операции."
     ),
-    dependencies=[Depends(get_admin_user)],
+    dependencies=[Depends(require_admin_key)],
 )
 def delete_center(
     center_id: int,
@@ -187,263 +278,6 @@ def delete_center(
 
     return {"detail": "Центр успешно удалён"}
 
-
-@auth_router.post(
-    "/register",
-    status_code=201,
-    summary="Зарегистрировать пользователя",
-    description=(
-        "Создаёт новую учётную запись по адресу электронной почты и паролю. "
-        "Пароль сохраняется в виде хеша. "
-        "Если пользователь с таким адресом уже существует, "
-        "возвращает ошибку 409."
-    ),
-)
-def register_user(
-    user_data: UserRegister,
-    db: Session = Depends(get_db),
-):
-    email = user_data.email.strip().lower()
-
-    existing_user = db.query(User).filter(
-        User.email == email
-    ).first()
-
-    if existing_user is not None:
-        raise HTTPException(
-            status_code=409,
-            detail="Пользователь с такой почтой уже существует",
-        )
-
-    user = User(
-        email=email,
-        password_hash=hash_password(user_data.password),
-    )
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    return {
-        "id": user.id,
-        "email": user.email,
-        "message": "Регистрация прошла успешно",
-    }
-
-
-@auth_router.post(
-    "/login",
-    response_model=TokenResponse,
-    summary="Войти в аккаунт",
-    description=(
-        "Проверяет адрес электронной почты и пароль пользователя. "
-        "При успешной авторизации возвращает JWT access-токен. "
-        "Токен используется для доступа к защищённым эндпоинтам. "
-        "Если данные неверны, возвращает ошибку 401."
-    ),
-)
-def login_user(
-    user_data: UserLogin,
-    db: Session = Depends(get_db),
-):
-    email = user_data.email.strip().lower()
-
-    user = db.query(User).filter(
-        User.email == email
-    ).first()
-
-    if user is None or not verify_password(
-        user_data.password,
-        user.password_hash,
-    ):
-        raise HTTPException(
-            status_code=401,
-            detail="Неверная почта или пароль",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    access_token = create_access_token(user.id)
-
-    return TokenResponse(access_token=access_token)
-
-
-@auth_router.get(
-    "/me",
-    summary="Получить данные текущего пользователя",
-    description=(
-        "Возвращает идентификатор, адрес электронной почты "
-        "и дату создания аккаунта текущего авторизованного пользователя. "
-        "Требуется действующий JWT access-токен."
-    ),
-)
-def get_me(current_user: User = Depends(get_current_user)):
-    return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "created_at": current_user.created_at,
-    }
-
-
-@auth_router.post(
-    "/token",
-    response_model=TokenResponse,
-    summary="Получить токен для Swagger",
-    description=(
-        "Принимает адрес электронной почты в поле username "
-        "и пароль в поле password в формате формы. "
-        "Возвращает JWT access-токен для авторизованных запросов. "
-        "Этот эндпоинт используется кнопкой Authorize в Swagger UI."
-    ),
-)
-def login_for_swagger(
-    username: str = Form(),
-    password: str = Form(),
-    db: Session = Depends(get_db),
-):
-    email = username.strip().lower()
-    user = db.query(User).filter(User.email == email).first()
-
-    if user is None or not verify_password(password, user.password_hash):
-        raise HTTPException(
-            status_code=401,
-            detail="Неверная почта или пароль",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return TokenResponse(access_token=create_access_token(user.id))
-
-
-@donations_router.post(
-    "",
-    status_code=201,
-    summary="Добавить донацию",
-    description=(
-        "Добавляет запись о донации в историю текущего пользователя. "
-        "В теле запроса передаются дата донации и необязательный "
-        "объём сданной крови в миллилитрах. "
-        "Идентификатор пользователя определяется по JWT-токену. "
-        "Требуется авторизация."
-    ),
-)
-def create_donation(
-    donation_data: DonationCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    donation = Donation(
-        user_id=current_user.id,
-        donation_date=donation_data.donation_date,
-        volume_ml=donation_data.volume_ml,
-    )
-
-    db.add(donation)
-    db.commit()
-    db.refresh(donation)
-
-    return donation
-
-
-@donations_router.get(
-    "",
-    summary="Получить историю донаций",
-    description=(
-        "Возвращает список донаций текущего пользователя, "
-        "отсортированный по дате от новых к старым. "
-        "Данные других пользователей не возвращаются. "
-        "Требуется авторизация."
-    ),
-)
-def get_donations(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    donations = (
-        db.query(Donation)
-        .filter(Donation.user_id == current_user.id)
-        .order_by(Donation.donation_date.desc())
-        .all()
-    )
-
-    return donations
-
-
-@profiles_router.get(
-    "/me",
-    response_model=DonorProfileResponse,
-    summary="Получить профиль донора",
-    description=(
-        "Возвращает профиль текущего авторизованного пользователя: "
-        "дату рождения, группу крови и резус-фактор. "
-        "Если профиль ещё не заполнен, возвращает пустые поля. "
-        "Требуется авторизация."
-    ),
-)
-def get_my_profile(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    profile = (
-        db.query(DonorProfile)
-        .filter(DonorProfile.user_id == current_user.id)
-        .first()
-    )
-
-    if profile is None:
-        return DonorProfileResponse(
-            birth_date=None,
-            blood_group=None,
-            rh_factor=None,
-        )
-
-    return DonorProfileResponse(
-        birth_date=profile.birth_date,
-        blood_group=profile.blood_group,
-        rh_factor=profile.rh_factor,
-    )
-
-
-@profiles_router.put(
-    "/me",
-    response_model=DonorProfileResponse,
-    summary="Создать или обновить профиль донора",
-    description=(
-        "Создаёт профиль текущего пользователя или обновляет существующий. "
-        "Можно указать дату рождения, группу крови и резус-фактор. "
-        "Передавать нужно только те поля, которые необходимо изменить. "
-        "Требуется авторизация."
-    ),
-)
-def update_my_profile(
-    profile_data: DonorProfileUpdate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    profile = (
-        db.query(DonorProfile)
-        .filter(DonorProfile.user_id == current_user.id)
-        .first()
-    )
-
-    update_data = profile_data.model_dump(exclude_unset=True)
-
-    if profile is None:
-        profile = DonorProfile(
-            user_id=current_user.id,
-            **update_data,
-        )
-        db.add(profile)
-    else:
-        for field, value in update_data.items():
-            setattr(profile, field, value)
-
-    db.commit()
-    db.refresh(profile)
-
-    return DonorProfileResponse(
-        birth_date=profile.birth_date,
-        blood_group=profile.blood_group,
-        rh_factor=profile.rh_factor,
-    )
 
 @events_router.get(
     "",
@@ -502,7 +336,7 @@ def get_event(
         "ссылку на запись и ID центра сдачи крови. "
         "Если указанный центр не существует, возвращает ошибку 404."
     ),
-    dependencies=[Depends(get_admin_user)],
+    dependencies=[Depends(require_admin_key)],
 )
 def create_event(
     event_data: EventCreate,
@@ -540,7 +374,7 @@ def create_event(
         "EventCreate. Если мероприятие или указанный центр не найдены, "
         "возвращает ошибку 404."
     ),
-    dependencies=[Depends(get_admin_user)],
+    dependencies=[Depends(require_admin_key)],
 )
 def update_event(
     event_id: int,
@@ -588,7 +422,7 @@ def update_event(
         "Удаляет мероприятие из базы данных по его ID. "
         "Если мероприятие не найдено, возвращает ошибку 404."
     ),
-    dependencies=[Depends(get_admin_user)],
+    dependencies=[Depends(require_admin_key)],
 )
 def delete_event(
     event_id: int,
@@ -612,8 +446,315 @@ def delete_event(
     return {"detail": "Мероприятие успешно удалено"}
 
 
-app.include_router(auth_router)
-app.include_router(profiles_router)
-app.include_router(donations_router)
+@rules_router.get(
+    "",
+    response_model=list[DonationRuleResponse],
+    summary="Получить список правил донорства",
+    description=(
+        "Возвращает список всех активных правил донорства. "
+        "Правила отсортированы по категориям и порядку отображения."
+    ),
+)
+def get_donation_rules(db: Session = Depends(get_db)):
+    return (
+        db.query(DonationRule)
+        .filter(DonationRule.is_active.is_(True))
+        .order_by(
+            DonationRule.category.asc(),
+            DonationRule.sort_order.asc(),
+        )
+        .all()
+    )
+
+
+@rules_router.get(
+    "/{rule_id}",
+    response_model=DonationRuleResponse,
+    summary="Получить правило донорства по ID",
+    description=(
+        "Возвращает информацию об активном правиле донорства. "
+        "Если правило не найдено или неактивно, возвращает ошибку 404."
+    ),
+)
+def get_donation_rule(
+    rule_id: int,
+    db: Session = Depends(get_db),
+):
+    rule = (
+        db.query(DonationRule)
+        .filter(
+            DonationRule.id == rule_id,
+            DonationRule.is_active.is_(True),
+        )
+        .first()
+    )
+
+    if rule is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Правило донорства не найдено",
+        )
+
+    return rule
+
+
+@rules_router.post(
+    "",
+    status_code=201,
+    response_model=DonationRuleAdminResponse,
+    summary="Создать правило донорства",
+    description=(
+        "Создаёт новое правило донорства. "
+        "Доступно только администратору."
+    ),
+    dependencies=[Depends(require_admin_key)],
+)
+def create_donation_rule(
+    rule_data: DonationRuleCreate,
+    db: Session = Depends(get_db),
+):
+    rule = DonationRule(**rule_data.model_dump())
+
+    db.add(rule)
+    db.commit()
+    db.refresh(rule)
+
+    return rule
+
+
+@rules_router.put(
+    "/{rule_id}",
+    response_model=DonationRuleAdminResponse,
+    summary="Обновить правило донорства",
+    description=(
+        "Полностью обновляет данные существующего правила. "
+        "Доступно только администратору."
+    ),
+    dependencies=[Depends(require_admin_key)],
+)
+def update_donation_rule(
+    rule_id: int,
+    rule_data: DonationRuleCreate,
+    db: Session = Depends(get_db),
+):
+    rule = (
+        db.query(DonationRule)
+        .filter(DonationRule.id == rule_id)
+        .first()
+    )
+
+    if rule is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Правило донорства не найдено",
+        )
+
+    for field, value in rule_data.model_dump().items():
+        setattr(rule, field, value)
+
+    db.commit()
+    db.refresh(rule)
+
+    return rule
+
+
+@rules_router.delete(
+    "/{rule_id}",
+    summary="Удалить правило донорства",
+    description=(
+        "Удаляет правило донорства из базы данных по его ID. "
+        "Доступно только администратору."
+    ),
+    dependencies=[Depends(require_admin_key)],
+)
+def delete_donation_rule(
+    rule_id: int,
+    db: Session = Depends(get_db),
+):
+    rule = (
+        db.query(DonationRule)
+        .filter(DonationRule.id == rule_id)
+        .first()
+    )
+
+    if rule is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Правило донорства не найдено",
+        )
+
+    db.delete(rule)
+    db.commit()
+
+    return {"detail": "Правило донорства успешно удалено"}
+
+
+@intervals_router.get(
+    "/matrix",
+    response_model=DonationIntervalMatrixResponse,
+    summary="Получить матрицу интервалов между донациями",
+    description=(
+        "Возвращает полную матрицу минимальных интервалов "
+        "между видами донаций, действующую на указанную дату. "
+        "Если дата не передана, используется текущая дата."
+    ),
+)
+def get_donation_interval_matrix(
+    for_date: date | None = None,
+    db: Session = Depends(get_db),
+):
+    target_date = for_date or date.today()
+
+    rows = (
+        db.query(DonationInterval)
+        .filter(
+            DonationInterval.valid_from <= target_date,
+            or_(
+                DonationInterval.valid_to.is_(None),
+                DonationInterval.valid_to >= target_date,
+            ),
+        )
+        .order_by(DonationInterval.valid_from.desc())
+        .all()
+    )
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="Матрица интервалов на указанную дату не найдена",
+        )
+
+    version_date = rows[0].valid_from
+
+    rows = [
+        row for row in rows
+        if row.valid_from == version_date
+    ]
+
+    expected_codes = {
+        item["code"] for item in DONATION_TYPES
+    }
+
+    matrix = {
+        code: {}
+        for code in expected_codes
+    }
+
+    for row in rows:
+        if (
+            row.previous_type not in expected_codes
+            or row.next_type not in expected_codes
+        ):
+            raise HTTPException(
+                status_code=500,
+                detail="В матрице обнаружен неизвестный тип донации",
+            )
+
+        matrix[row.previous_type][row.next_type] = row.days
+
+    missing_pairs = [
+        (previous, next_)
+        for previous in expected_codes
+        for next_ in expected_codes
+        if next_ not in matrix[previous]
+    ]
+
+    if missing_pairs:
+        raise HTTPException(
+            status_code=500,
+            detail="Матрица интервалов заполнена не полностью",
+        )
+
+    valid_to_values = {row.valid_to for row in rows}
+    source_values = {row.source_url for row in rows}
+
+    if len(valid_to_values) != 1 or len(source_values) != 1:
+        raise HTTPException(
+            status_code=500,
+            detail="У записей матрицы различаются данные версии",
+        )
+
+    return {
+        "valid_from": version_date,
+        "valid_to": rows[0].valid_to,
+        "source_url": rows[0].source_url,
+        "donation_types": DONATION_TYPES,
+        "matrix": matrix,
+    }
+
+
+@intervals_router.post(
+    "/matrix",
+    status_code=201,
+    response_model=DonationIntervalMatrixResponse,
+    summary="Создать версию матрицы интервалов",
+    description=(
+        "Сохраняет новую версию матрицы интервалов между донациями. "
+        "Каждая матрица должна содержать все 36 комбинаций. "
+        "Доступно только администратору."
+    ),
+    dependencies=[Depends(require_admin_key)],
+)
+def create_donation_interval_matrix(
+    matrix_data: DonationIntervalMatrixCreate,
+    db: Session = Depends(get_db),
+):
+    overlapping_version = (
+        db.query(DonationInterval)
+        .filter(
+            or_(
+                DonationInterval.valid_to.is_(None),
+                DonationInterval.valid_to >= matrix_data.valid_from,
+            ),
+            or_(
+                matrix_data.valid_to is None,
+                DonationInterval.valid_from <= matrix_data.valid_to,
+            ),
+        )
+        .first()
+    )
+
+    if overlapping_version is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Период действия новой матрицы пересекается "
+                "с уже существующей версией"
+            ),
+        )
+
+    intervals = []
+
+    for previous_type, row in matrix_data.matrix.items():
+        for next_type, days in row.items():
+            intervals.append(
+                DonationInterval(
+                    previous_type=previous_type,
+                    next_type=next_type,
+                    days=days,
+                    valid_from=matrix_data.valid_from,
+                    valid_to=matrix_data.valid_to,
+                    source_url=matrix_data.source_url,
+                )
+            )
+
+    try:
+        db.add_all(intervals)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return {
+        "valid_from": matrix_data.valid_from,
+        "valid_to": matrix_data.valid_to,
+        "source_url": matrix_data.source_url,
+        "donation_types": DONATION_TYPES,
+        "matrix": matrix_data.matrix,
+    }
+
+
 app.include_router(centers_router)
 app.include_router(events_router)
+app.include_router(rules_router)
+app.include_router(intervals_router)
