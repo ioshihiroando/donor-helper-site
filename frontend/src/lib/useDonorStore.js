@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { load, newId, save } from './storage.js'
+import { loadDiary, newId, saveDiary } from './storage.js'
 
-// Хук-хранилище: список сдач + прочитанные уведомления.
+// Личный дневник донаций. Хранится только на устройстве, на сервер не уходит.
 export function useDonorStore() {
-  const [data, setData] = useState(load)
+  const [data, setData] = useState(loadDiary)
 
-  useEffect(() => save(data), [data])
+  useEffect(() => { saveDiary(data) }, [data])
 
   // синхронизация между вкладками
   useEffect(() => {
-    const onStorage = () => setData(load())
+    const onStorage = () => setData(loadDiary())
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])

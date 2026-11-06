@@ -1,67 +1,61 @@
-// Уведомления собираются на фронте из локальных данных и списка
-// мероприятий. Это лента внутри сайта, не push.
+// Уведомления собираются на фронте из локального дневника и списка
+// мероприятий. Это лента внутри сайта, не push (push в MVP не согласован).
 
-import { dateLong, dateShort } from './format.js'
+import { dateLong, dateShort, eventWhen, isUpcoming, zonedDateIso } from './format.js'
 import { toISO } from './rules.js'
 
 export function buildNotifications({ donations, next, events, today = toISO(new Date()) }) {
   const list = []
 
-  // ближайшее мероприятие в будущем
-  const upcoming = events
-    .filter((e) => e.date && e.date >= today)
-    .sort((a, b) => (a.date < b.date ? -1 : 1))[0]
+  const upcoming = (events ?? []).filter((e) => isUpcoming(e))[0] // backend уже сортирует по starts_at
   if (upcoming) {
     list.push({
-      id: `event-${upcoming.id}-${upcoming.date}`,
+      id: `event-${upcoming.id}-${upcoming.starts_at}`,
       kind: 'event',
       title: upcoming.title,
-      text: `${dateLong(upcoming.date, false)}${upcoming.time ? ', ' + upcoming.time : ''}. ${upcoming.address}`.trim(),
-      when: 'Скоро',
-      sort: today,
+      text: eventWhen(upcoming),
+      when: dateShort(zonedDateIso(upcoming.starts_at)),
+      href: `#/events/${upcoming.id}`,
     })
   }
 
-  if (next && next.daysLeft === 0) {
+  const ok = next && !next.unavailable
+  if (ok && next.daysLeft === 0) {
     list.push({
       id: `ready-${next.date}`,
       kind: 'ready',
       title: 'Можно сдавать снова',
-      text: `Интервал после сдачи ${dateLong(next.from.date, false)} прошёл.`,
+      text: `Минимальный интервал после сдачи ${dateLong(next.from.date, false)} прошёл.`,
       when: dateShort(next.date),
-      sort: next.date,
     })
-  } else if (next && next.daysLeft <= 3) {
+  } else if (ok && next.daysLeft <= 3) {
     list.push({
       id: `prepare-${next.date}`,
       kind: 'prepare',
-      title: 'Как подготовиться',
-      text: 'За 1–2 дня до сдачи: больше воды, меньше жирного.',
+      title: 'Скоро можно сдавать',
+      text: 'Как подготовиться — в разделе «Информация».',
       when: dateShort(today),
-      sort: today,
+      href: '#/info',
     })
   }
 
   const last = donations[0]
-  if (last && next) {
+  if (last) {
     list.push({
       id: `saved-${last.id}`,
       kind: 'saved',
       title: 'Сдача записана',
-      text: `${dateLong(last.date, false)}${last.volume ? ', ' + last.volume + ' мл' : ''}. Следующая сдача с ${dateLong(next.date, false)}.`,
+      text: `${dateLong(last.date, false)}${last.volume ? ', ' + last.volume + ' мл' : ''}.${ok ? ` Следующая — ориентировочно с ${dateLong(next.date, false)}.` : ''}`,
       when: dateShort(last.date),
-      sort: last.date,
     })
-  }
-
-  if (!donations.length) {
+  } else {
     list.push({
       id: 'welcome',
       kind: 'prepare',
       title: 'Первая сдача?',
       text: 'В разделе «Информация» — как подготовиться и что взять с собой.',
       when: '',
-      sort: today,
+      href: '#/info',
     })
   }
 

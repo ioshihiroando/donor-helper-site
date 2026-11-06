@@ -136,14 +136,6 @@ button.counter:disabled { cursor: default; }
 .counter--soft { background: var(--red-softer); border-radius: var(--r); padding: 16px; }
 .counter--soft .counter__value { font-size: 24px; }
 
-.city-stats { display: flex; flex-direction: column; gap: 14px; }
-.city-stats h3 { font-size: 14px; font-weight: 700; margin-top: 6px; }
-.bars { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; height: 160px; align-items: end; }
-.bars__col { display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 6px; }
-.bars__val { font-size: 12px; font-weight: 700; }
-.bars__bar { width: 100%; background: var(--red-mid); border-radius: 8px 8px 0 0; max-height: 75%; min-height: 6px; }
-.bars__bar.is-current { background: var(--red); }
-.bars__label { font-size: 12px; color: var(--ink-3); }
 
 .notif-list { display: flex; flex-direction: column; gap: 12px; }
 .notif { display: flex; gap: 12px; position: relative; padding: 14px; }
@@ -261,10 +253,7 @@ fieldset.field .field__label { margin-bottom: 8px; }
 
   .home-grid { display: grid; grid-template-columns: 414px 1fr; gap: 24px; align-items: start; }
   .home-left { grid-column: 1; }
-  .city-stats { grid-column: 2; border-radius: 24px; padding: 28px; }
-  .notifications { grid-column: 1 / -1; }
-  .home-grid:not(:has(.city-stats)) .notifications { grid-column: 2; grid-row: 1; }
-  .home-grid:has(.city-stats) .notif-list { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .notifications { grid-column: 2; grid-row: 1; }
   .next-card { padding: 28px; border-radius: 24px; }
   .next-card__num { font-size: 72px; }
   .next-card__unit { font-size: 24px; }
@@ -284,4 +273,39 @@ fieldset.field .field__label { margin-bottom: 8px; }
   .sheet-backdrop { align-items: center; justify-content: center; }
   .sheet { width: 480px; border-radius: 28px; padding: 24px 28px 28px; max-height: 90vh; }
   .sheet__handle { display: none; }
+}
+
+/* ---------- состояния загрузки ---------- */
+.state { padding: 8px 0; }
+.state--error { background: var(--red-softer); border: 1px solid var(--line-accent); border-radius: var(--r); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--ink-2); }
+.tag--muted { background: #f1ecec; color: var(--ink-3); align-self: flex-start; }
+.rot-90 { transform: rotate(90deg); }
+.rot-270 { transform: rotate(-90deg); }
+.underline { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- главная: пояснение к расчёту ---------- */
+.next-card__note { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; font-size: 12px; color: #5a4b4a; line-height: 1.4; }
+.next-card__note a { color: var(--red-dark); text-decoration: underline; }
+a.notif:hover { border-color: var(--line-accent); }
+
+/* ---------- памятки ---------- */
+.rule { display: flex; flex-direction: column; gap: 12px; }
+.rule h3 { color: var(--red-dark); }
+.rule__content { display: flex; flex-direction: column; gap: 10px; font-size: 14px; color: var(--ink-2); line-height: 1.5; }
+.rule__content .checklist { display: flex; flex-direction: column; gap: 10px; }
+.rule__content .checklist li { display: flex; gap: 10px; }
+.source-link { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 600; color: var(--red-dark); align-self: flex-start; }
+.faq__a { padding: 0 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------- предложения и детали ---------- */
+.offer__title:hover { color: var(--red-dark); }
+.offer__desc { font-size: 14px; color: var(--ink-2); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.offer__actions { display: flex; gap: 10px; margin-top: auto; }
+.offer__actions .btn { flex: 1; height: 46px; border-radius: var(--r-sm); }
+a.centers__row:hover { background: var(--red-softer); }
+.back-link { display: inline-flex; align-items: center; gap: 4px; font-weight: 700; color: var(--red-dark); font-size: 15px; }
+.details__card { display: flex; flex-direction: column; gap: 16px; border-radius: var(--r-lg); padding: 20px; }
+.details__text { font-size: 15px; color: var(--ink-2); line-height: 1.55; white-space: pre-line; }
+@media (min-width: 1024px) {
+  .details { max-width: 720px; }
 }

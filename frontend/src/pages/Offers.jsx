@@ -1,28 +1,10 @@
-import { useEffect, useState } from 'react'
 import Icon from '../components/Icon.jsx'
-import { fetchCenters } from '../lib/api.js'
-import { dateLong } from '../lib/format.js'
-import { toISO, typeLabel } from '../lib/rules.js'
+import { Empty, ErrorState, Loading } from '../components/Status.jsx'
+import { dateLong, eventWhen, isUpcoming, zonedDateIso } from '../lib/format.js'
 
-const FILTERS = [
-  { id: 'all', label: 'Все' },
-  { id: 'university', label: 'В вузах' },
-  { id: 'promo', label: 'Акции' },
-]
-
-export default function Offers({ events }) {
-  const [filter, setFilter] = useState('all')
-  const [centers, setCenters] = useState({ items: [], loading: true })
-
-  useEffect(() => {
-    fetchCenters().then((r) => setCenters({ ...r, loading: false }))
-  }, [])
-
-  const today = toISO(new Date())
-  const list = events.items
-    .filter((e) => !e.date || e.date >= today)
-    .filter((e) => filter === 'all' || e.category === filter)
-    .sort((a, b) => ((a.date ?? '') < (b.date ?? '') ? -1 : 1))
+export default function Offers({ events, centers }) {
+  const centerById = new Map((centers.data ?? []).map((c) => [c.id, c]))
+  const upcoming = (events.data ?? []).filter((e) => isUpcoming(e))
 
   return (
     <div className="page offers">
@@ -31,87 +13,73 @@ export default function Offers({ events }) {
         <p className="muted">Где и когда сдать кровь в Москве</p>
       </header>
 
-      {(events.demo || centers.demo) && !events.loading && (
-        <p className="notice">Демо-данные: бэкенд не подключён{events.error || centers.error ? ' или недоступен' : ''}.</p>
-      )}
-
-      <div className="chips" role="tablist" aria-label="Фильтр">
-        {FILTERS.map((f) => (
-          <button
-            key={f.id}
-            role="tab"
-            aria-selected={filter === f.id}
-            className={'chip chip--pill' + (filter === f.id ? ' is-active' : '')}
-            onClick={() => setFilter(f.id)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-
-      {events.loading ? (
-        <p className="muted">Загружаем мероприятия…</p>
-      ) : list.length === 0 ? (
-        <p className="muted">Ближайших мероприятий нет.</p>
-      ) : (
-        <div className="offer-grid">
-          {list.map((e) => (
-            <article key={e.id} className="card offer">
-              <div className="offer__top">
-                <span className="tag">{e.category === 'promo' && e.donationType === 'blood' ? 'Акция' : typeLabel(e.donationType)}</span>
-                <span className="offer__date">{e.dateLabel ?? (e.date ? dateLong(e.date, false) : '')}</span>
-              </div>
-              <h3>{e.title}</h3>
-              <ul className="meta">
-                {e.address && <li><Icon name="pin" size={20} />{e.address}</li>}
-                {e.time && <li><Icon name="clock" size={20} />{e.time}</li>}
-                {e.note && <li><Icon name="drop" size={20} />{e.note}</li>}
-              </ul>
-              {e.url ? (
-                <a className="btn btn--outline" href={e.url} target="_blank" rel="noopener noreferrer">
-                  Записаться на сайте <Icon name="arrow" size={18} strokeWidth={2.4} />
-                </a>
-              ) : (
-                <span className="btn btn--outline is-disabled" aria-disabled="true">Ссылка на запись скоро появится</span>
-              )}
-            </article>
-          ))}
-        </div>
-      )}
+      <section>
+        <h2>Мероприятия</h2>
+        {events.status === 'loading' && <Loading text="Загружаем мероприятия…" />}
+        {events.status === 'error' && <ErrorState error={events.error} onRetry={events.reload} />}
+        {events.status === 'ok' && upcoming.length === 0 && <Empty text="Ближайших мероприятий нет." />}
+        {upcoming.length > 0 && (
+          <div className="offer-grid">
+            {upcoming.map((e) => (
+              <EventCard key={e.id} e={e} center={centerById.get(e.center_id)} />
+            ))}
+          </div>
+        )}
+      </section>
 
       <section>
         <h2>Центры крови</h2>
-        <div className="card centers">
-          <div className="centers__head desktop-only">
-            <span>Название</span>
-            <span>Адрес</span>
-            <span>Часы работы</span>
-            <span />
-          </div>
-          {centers.items.map((c) => (
-            <div key={c.id} className="centers__row">
-              <span className="centers__name">{c.name}</span>
-              <span className="centers__addr">{c.address}</span>
-              <span className="centers__hours muted">{c.hours}</span>
-              {c.url ? (
-                <a className="icon-btn icon-btn--soft" href={c.url} target="_blank" rel="noopener noreferrer" aria-label={`Сайт: ${c.name}`}>
-                  <Icon name="arrow" size={22} />
-                </a>
-              ) : (
-                <a
-                  className="icon-btn icon-btn--soft"
-                  href={`https://yandex.ru/maps/?text=${encodeURIComponent('Москва, ' + c.address)}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label={`На карте: ${c.name}`}
-                >
-                  <Icon name="arrow" size={22} />
-                </a>
-              )}
+        {centers.status === 'loading' && <Loading text="Загружаем центры…" />}
+        {centers.status === 'error' && <ErrorState error={centers.error} onRetry={centers.reload} />}
+        {centers.status === 'ok' && centers.data.length === 0 && <Empty text="Центры пока не добавлены." />}
+        {centers.data?.length > 0 && (
+          <div className="card centers">
+            <div className="centers__head desktop-only">
+              <span>Название</span>
+              <span>Адрес</span>
+              <span>Город</span>
+              <span />
             </div>
-          ))}
-        </div>
+            {centers.data.map((c) => (
+              <a key={c.id} className="centers__row" href={`#/centers/${c.id}`}>
+                <span className="centers__name">{c.name}</span>
+                <span className="centers__addr">{c.address}</span>
+                <span className="centers__hours muted">{c.city}</span>
+                <span className="icon-btn icon-btn--soft" aria-hidden="true">
+                  <Icon name="chevron" size={22} className="rot-270" />
+                </span>
+              </a>
+            ))}
+          </div>
+        )}
       </section>
     </div>
+  )
+}
+
+function EventCard({ e, center }) {
+  return (
+    <article className="card offer">
+      <div className="offer__top">
+        <span className="tag">Мероприятие</span>
+        <span className="offer__date">{dateLong(zonedDateIso(e.starts_at), false)}</span>
+      </div>
+      <h3>
+        <a href={`#/events/${e.id}`} className="offer__title">{e.title}</a>
+      </h3>
+      <ul className="meta">
+        <li><Icon name="clock" size={20} />{eventWhen(e)}</li>
+        {center && <li><Icon name="pin" size={20} />{center.name}, {center.address}</li>}
+      </ul>
+      {e.description && <p className="offer__desc">{e.description}</p>}
+      <div className="offer__actions">
+        <a className="btn btn--outline" href={`#/events/${e.id}`}>Подробнее</a>
+        {e.signup_url && (
+          <a className="btn btn--primary" href={e.signup_url} target="_blank" rel="noopener noreferrer">
+            Записаться <Icon name="arrow" size={18} strokeWidth={2.4} />
+          </a>
+        )}
+      </div>
+    </article>
   )
 }
