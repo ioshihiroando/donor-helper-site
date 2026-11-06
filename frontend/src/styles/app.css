@@ -309,3 +309,13 @@ a.centers__row:hover { background: var(--red-softer); }
 @media (min-width: 1024px) {
   .details { max-width: 720px; }
 }
+
+/* ---------- установка PWA ---------- */
+.install { display: flex; gap: 12px; padding: 14px; border-radius: var(--r); background: #fff; border: 1px solid var(--line-accent); }
+.install__icon { width: 40px; height: 40px; border-radius: 12px; background: var(--red); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+.install__body { display: flex; flex-direction: column; gap: 4px; }
+.install__title { font-weight: 700; font-size: 15px; }
+.install__text { font-size: 14px; color: var(--ink-2); line-height: 1.4; }
+.install__actions { display: flex; align-items: center; gap: 16px; margin-top: 6px; }
+.install__btn { height: 40px; padding: 0 16px; border-radius: 12px; font-size: 14px; }
+@media (min-width: 1024px) { .install { max-width: 414px; } }

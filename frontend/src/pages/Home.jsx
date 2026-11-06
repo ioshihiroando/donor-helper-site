@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import Icon from '../components/Icon.jsx'
+import InstallBanner from '../components/InstallBanner.jsx'
 import Sheet from '../components/Sheet.jsx'
 import { dateLong, days, num } from '../lib/format.js'
 import { buildNotifications } from '../lib/notifications.js'
@@ -43,6 +44,8 @@ export default function Home({ store, matrix, events }) {
           {unread.length > 0 && <span className="badge">{unread.length}</span>}
         </button>
       </header>
+
+      <InstallBanner />
 
       <div className="home-grid">
         <div className="home-left">
