@@ -319,3 +319,14 @@ a.centers__row:hover { background: var(--red-softer); }
 .install__actions { display: flex; align-items: center; gap: 16px; margin-top: 6px; }
 .install__btn { height: 40px; padding: 0 16px; border-radius: 12px; font-size: 14px; }
 @media (min-width: 1024px) { .install { max-width: 414px; } }
+
+/* ---------- выбор вида следующей донации, правка записей ---------- */
+.target { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 4px; }
+.target__label { font-size: 12px; color: #5a4b4a; }
+.target__select {
+  appearance: none; -webkit-appearance: none; font: inherit; font-size: 14px; font-weight: 700; color: var(--red-dark);
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23B71C1C' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  border: 1px solid var(--line-accent); border-radius: 12px; padding: 8px 36px 8px 12px; align-self: flex-start; max-width: 100%; cursor: pointer;
+}
+.target__select:focus { outline: none; border-color: var(--red); }
+.history__actions { display: flex; gap: 8px; }

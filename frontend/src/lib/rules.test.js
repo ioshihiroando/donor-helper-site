@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { addDays, diffDays, isValidMatrix, nextAllowed } from './rules.js'
 import { migrate } from './storage.js'
+import { isUpcoming } from './format.js'
 
 // Тестовая матрица в формате ответа GET /api/donation-intervals/matrix.
 // Значения — только для тестов; в приложении они приходят с backend.
@@ -91,5 +92,33 @@ describe('миграция локального дневника', () => {
   })
   it('повреждённые данные — пустой дневник', () => {
     expect(migrate('мусор').donations.length).toBe(0)
+  })
+})
+
+describe('выбор вида следующей донации (BUG-2)', () => {
+  it('после цельной крови: кровь через 60 дней, плазма через 30', () => {
+    const d = [{ date: '2026-10-12', type: 'whole_blood' }]
+    expect(nextAllowed(d, MATRIX, 'whole_blood', '2026-10-12').date).toBe('2026-12-11')
+    expect(nextAllowed(d, MATRIX, 'plasma', '2026-10-12').date).toBe('2026-11-11')
+  })
+  it('выбор сохраняется в дневнике, по умолчанию — цельная кровь', () => {
+    expect(migrate({ donations: [], nextType: 'plasma' }).nextType).toBe('plasma')
+    expect(migrate({ donations: [] }).nextType).toBe('whole_blood')
+  })
+})
+
+describe('мероприятия без ends_at (BUG-3)', () => {
+  const ev = { starts_at: '2026-11-12T11:00:00+03:00', ends_at: null }
+  it('видно в течение всего дня начала', () => {
+    expect(isUpcoming(ev, new Date('2026-11-12T18:00:00+03:00'))).toBe(true)
+    expect(isUpcoming(ev, new Date('2026-11-12T23:59:00+03:00'))).toBe(true)
+  })
+  it('пропадает на следующий день', () => {
+    expect(isUpcoming(ev, new Date('2026-11-13T00:01:00+03:00'))).toBe(false)
+  })
+  it('с ends_at — по времени окончания', () => {
+    const e2 = { starts_at: '2026-11-12T11:00:00+03:00', ends_at: '2026-11-12T15:00:00+03:00' }
+    expect(isUpcoming(e2, new Date('2026-11-12T14:59:00+03:00'))).toBe(true)
+    expect(isUpcoming(e2, new Date('2026-11-12T15:01:00+03:00'))).toBe(false)
   })
 })

@@ -25,6 +25,17 @@ export function useDonorStore() {
     return item
   }, [])
 
+  const updateDonation = useCallback((id, { date, type, volume }) => {
+    setData((d) => ({
+      ...d,
+      donations: d.donations.map((x) => (x.id === id ? { ...x, date, type, volume: Number(volume) || 0, updatedAt: new Date().toISOString() } : x)),
+    }))
+  }, [])
+
+  const setNextType = useCallback((code) => {
+    setData((d) => ({ ...d, nextType: code }))
+  }, [])
+
   const removeDonation = useCallback((id) => {
     setData((d) => ({ ...d, donations: d.donations.filter((x) => x.id !== id) }))
   }, [])
@@ -35,5 +46,15 @@ export function useDonorStore() {
 
   const totalVolume = donations.reduce((s, d) => s + (d.volume || 0), 0)
 
-  return { donations, totalVolume, addDonation, removeDonation, readIds: data.readNotifications, markRead }
+  return {
+    donations,
+    totalVolume,
+    addDonation,
+    updateDonation,
+    removeDonation,
+    nextType: data.nextType,
+    setNextType,
+    readIds: data.readNotifications,
+    markRead,
+  }
 }

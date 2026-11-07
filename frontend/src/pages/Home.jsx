@@ -7,13 +7,16 @@ import { buildNotifications } from '../lib/notifications.js'
 import { DONATION_TYPE_CODES, FALLBACK_TYPE_NAMES, nextAllowed, toISO, typeName } from '../lib/rules.js'
 
 export default function Home({ store, matrix, events }) {
-  const { donations, totalVolume, addDonation, removeDonation, readIds, markRead } = store
+  const { donations, totalVolume, addDonation, updateDonation, removeDonation, nextType, setNextType, readIds, markRead } = store
   const [sheet, setSheet] = useState(null) // null | 'form' | 'done' | 'history'
   const [saved, setSaved] = useState(null)
+  const [editing, setEditing] = useState(null) // запись, которую редактируем, или null
   const notifRef = useRef(null)
 
   const donationTypes = matrix.data?.donation_types ?? DONATION_TYPE_CODES.map((code) => ({ code, name: FALLBACK_TYPE_NAMES[code] }))
-  const next = nextAllowed(donations, matrix.data, 'whole_blood')
+  // вид следующей донации выбирает пользователь; если такого кода нет в матрице — цельная кровь
+  const target = donationTypes.some((t) => t.code === nextType) ? nextType : 'whole_blood'
+  const next = nextAllowed(donations, matrix.data, target)
 
   const notifications = useMemo(
     () => buildNotifications({ donations, next, events: events.data }),
@@ -27,9 +30,31 @@ export default function Home({ store, matrix, events }) {
     markRead(notifications.map((n) => n.id))
   }
 
+  const openNew = () => {
+    setEditing(null)
+    setSheet('form')
+  }
+
+  const openEdit = (donation) => {
+    setEditing(donation)
+    setSheet('form')
+  }
+
   const onSave = (values) => {
+    if (editing) {
+      updateDonation(editing.id, values)
+      setEditing(null)
+      setSheet('history') // после правки возвращаемся к списку
+      return
+    }
     setSaved(addDonation(values))
     setSheet('done')
+  }
+
+  const closeForm = () => {
+    const wasEditing = Boolean(editing)
+    setEditing(null)
+    setSheet(wasEditing ? 'history' : null)
   }
 
   return (
@@ -49,7 +74,13 @@ export default function Home({ store, matrix, events }) {
 
       <div className="home-grid">
         <div className="home-left">
-          <NextCard next={next} matrix={matrix} hasDonations={donations.length > 0} onRecord={() => setSheet('form')} />
+          <NextCard
+            next={next}
+            matrix={matrix}
+            hasDonations={donations.length > 0}
+            onRecord={openNew}
+            picker={<TargetPicker types={donationTypes} value={target} onChange={setNextType} />}
+          />
 
           <div className="counters">
             <button className="card counter" onClick={() => setSheet('history')} disabled={!donations.length}>
@@ -62,7 +93,7 @@ export default function Home({ store, matrix, events }) {
             </div>
           </div>
 
-          <button className="btn btn--primary btn--big" onClick={() => setSheet('form')}>
+          <button className="btn btn--primary btn--big" onClick={openNew}>
             <Icon name="plus" size={20} strokeWidth={2.4} />
             Записать сдачу
           </button>
@@ -78,22 +109,22 @@ export default function Home({ store, matrix, events }) {
         </section>
       </div>
 
-      <Sheet open={sheet === 'form'} onClose={() => setSheet(null)} title="Записать сдачу">
-        <DonationForm types={donationTypes} onSubmit={onSave} />
+      <Sheet open={sheet === 'form'} onClose={closeForm} title={editing ? 'Изменить запись' : 'Записать сдачу'}>
+        <DonationForm key={editing?.id ?? 'new'} types={donationTypes} initial={editing} onSubmit={onSave} />
       </Sheet>
 
       <Sheet open={sheet === 'done'} onClose={() => setSheet(null)}>
-        {saved && <Done saved={saved} next={next} types={donationTypes} onClose={() => setSheet(null)} />}
+        {saved && <Done saved={saved} next={next} target={target} types={donationTypes} onClose={() => setSheet(null)} />}
       </Sheet>
 
       <Sheet open={sheet === 'history'} onClose={() => setSheet(null)} title="Мои сдачи">
-        <History donations={donations} types={donationTypes} onRemove={removeDonation} />
+        <History donations={donations} types={donationTypes} onEdit={openEdit} onRemove={removeDonation} />
       </Sheet>
     </div>
   )
 }
 
-function NextCard({ next, matrix, hasDonations, onRecord }) {
+function NextCard({ next, matrix, hasDonations, onRecord, picker }) {
   if (!hasDonations) {
     return (
       <section className="next-card">
@@ -109,6 +140,7 @@ function NextCard({ next, matrix, hasDonations, onRecord }) {
     return (
       <section className="next-card" aria-live="polite">
         <p className="next-card__label">До следующей сдачи</p>
+        {picker}
         <p className="next-card__empty">
           {loading ? 'Загружаем правила интервалов…' : 'Расчёт временно недоступен: не удалось загрузить правила интервалов с сервера.'}
         </p>
@@ -119,18 +151,19 @@ function NextCard({ next, matrix, hasDonations, onRecord }) {
 
   return (
     <section className="next-card" aria-live="polite">
-      <NextBody next={next} />
+      <NextBody next={next} picker={picker} />
       <Progress next={next} />
       <RulesNote matrix={matrix} next={next} />
     </section>
   )
 }
 
-function NextBody({ next }) {
+function NextBody({ next, picker, caption = 'До следующей сдачи' }) {
   const ready = next.daysLeft === 0
   return (
     <>
-      <p className="next-card__label">До следующей сдачи</p>
+      <p className="next-card__label">{caption}</p>
+      {picker}
       {ready ? (
         <p className="next-card__ready">Можно сдавать</p>
       ) : (
@@ -143,6 +176,20 @@ function NextBody({ next }) {
         {ready ? 'Минимальный интервал прошёл' : `Ориентировочно с ${dateLong(next.date)}`}
       </p>
     </>
+  )
+}
+
+// BUG-2: пользователь выбирает, что планирует сдавать в следующий раз
+function TargetPicker({ types, value, onChange }) {
+  return (
+    <label className="target">
+      <span className="target__label">Что планируете сдавать</span>
+      <select className="target__select" value={value} onChange={(e) => onChange(e.target.value)}>
+        {types.map((t) => (
+          <option key={t.code} value={t.code}>{t.name}</option>
+        ))}
+      </select>
+    </label>
   )
 }
 
@@ -175,11 +222,11 @@ function RulesNote({ matrix, next }) {
   )
 }
 
-function DonationForm({ types, onSubmit }) {
+function DonationForm({ types, initial, onSubmit }) {
   const today = toISO(new Date())
-  const [date, setDate] = useState(today)
-  const [type, setType] = useState('whole_blood')
-  const [volume, setVolume] = useState('450')
+  const [date, setDate] = useState(initial?.date ?? today)
+  const [type, setType] = useState(initial?.type ?? 'whole_blood')
+  const [volume, setVolume] = useState(initial ? String(initial.volume || '') : '450')
   const [error, setError] = useState('')
 
   const pickType = (code) => {
@@ -232,13 +279,13 @@ function DonationForm({ types, onSubmit }) {
 
       {error && <p className="form__error" role="alert">{error}</p>}
 
-      <button className="btn btn--primary btn--big" type="submit">Сохранить</button>
+      <button className="btn btn--primary btn--big" type="submit">{initial ? 'Сохранить изменения' : 'Сохранить'}</button>
       <p className="form__privacy">Данные хранятся только на этом устройстве и никуда не отправляются.</p>
     </form>
   )
 }
 
-function Done({ saved, next, types, onClose }) {
+function Done({ saved, next, target, types, onClose }) {
   return (
     <div className="done">
       <div className="done__check">
@@ -250,7 +297,7 @@ function Done({ saved, next, types, onClose }) {
       </p>
       {next && !next.unavailable && (
         <div className="next-card next-card--center">
-          <NextBody next={next} />
+          <NextBody next={next} caption={`До следующей сдачи: ${typeName(target, types).toLowerCase()}`} />
         </div>
       )}
       <button className="btn btn--primary btn--big" onClick={onClose}>На главную</button>
@@ -258,7 +305,7 @@ function Done({ saved, next, types, onClose }) {
   )
 }
 
-function History({ donations, types, onRemove }) {
+function History({ donations, types, onEdit, onRemove }) {
   if (!donations.length) return <p className="muted">Пока нет записей.</p>
   return (
     <ul className="history">
@@ -268,13 +315,18 @@ function History({ donations, types, onRemove }) {
             <p className="history__date">{dateLong(d.date)}</p>
             <p className="muted">{typeName(d.type, types)}{d.volume ? ` · ${d.volume} мл` : ''}</p>
           </div>
-          <button
-            className="icon-btn icon-btn--soft"
-            aria-label={`Удалить запись от ${dateLong(d.date)}`}
-            onClick={() => window.confirm('Удалить эту запись?') && onRemove(d.id)}
-          >
-            <Icon name="trash" size={20} />
-          </button>
+          <div className="history__actions">
+            <button className="icon-btn icon-btn--soft" aria-label={`Изменить запись от ${dateLong(d.date)}`} onClick={() => onEdit(d)}>
+              <Icon name="edit" size={20} />
+            </button>
+            <button
+              className="icon-btn icon-btn--soft"
+              aria-label={`Удалить запись от ${dateLong(d.date)}`}
+              onClick={() => window.confirm('Удалить эту запись?') && onRemove(d.id)}
+            >
+              <Icon name="trash" size={20} />
+            </button>
+          </div>
         </li>
       ))}
     </ul>

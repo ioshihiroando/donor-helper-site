@@ -7,7 +7,7 @@ const LEGACY_KEY = 'donor-pomoshnik:v1' // формат первой верси�
 const MATRIX_CACHE_KEY = 'donor-pomoshnik:matrix-cache'
 
 export const DIARY_VERSION = 2
-const EMPTY = { version: DIARY_VERSION, donations: [], readNotifications: [] }
+const EMPTY = { version: DIARY_VERSION, donations: [], readNotifications: [], nextType: 'whole_blood' }
 
 // Коды первой версии фронта → коды backend
 const LEGACY_TYPES = {
@@ -55,7 +55,9 @@ export function migrate(data) {
   if (!data || typeof data !== 'object') return { ...EMPTY }
   const donations = (Array.isArray(data.donations) ? data.donations : []).map(cleanDonation).filter(Boolean)
   const readNotifications = Array.isArray(data.readNotifications) ? data.readNotifications.filter((x) => typeof x === 'string') : []
-  return { version: DIARY_VERSION, donations, readNotifications }
+  // какой вид донации пользователь планирует следующим (для расчёта на главной)
+  const nextType = typeof data.nextType === 'string' && data.nextType ? data.nextType : 'whole_blood'
+  return { version: DIARY_VERSION, donations, readNotifications, nextType }
 }
 
 export function loadDiary() {

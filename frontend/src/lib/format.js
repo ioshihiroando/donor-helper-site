@@ -53,7 +53,12 @@ export function eventWhen(e, withYear = false) {
   return `${start} — ${dateLong(endDay, withYear)}, ${zonedTime(e.ends_at)}`
 }
 
-/** Мероприятие ещё не закончилось */
+/**
+ * Мероприятие ещё не закончилось.
+ * Если ends_at не указан, считаем, что оно идёт до конца дня начала (по Москве),
+ * а не пропадает сразу после времени старта.
+ */
 export function isUpcoming(e, now = new Date()) {
-  return new Date(e.ends_at ?? e.starts_at) >= now
+  if (e.ends_at) return new Date(e.ends_at) >= now
+  return zonedDateIso(e.starts_at) >= zonedDateIso(now.toISOString())
 }

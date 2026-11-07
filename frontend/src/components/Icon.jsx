@@ -43,6 +43,12 @@ const PATHS = {
   plus: <path d="M12 6v12M6 12h12" />,
   chevron: <path d="M6 9l6 6 6-6" />,
   trash: <path d="M5 7h14M10 7V5h4v2M7 7l1 13h8l1-13" />,
+  edit: (
+    <>
+      <path d="M4 20h4L18.5 9.5a2.12 2.12 0 0 0-3-3L5 17v3z" />
+      <path d="M13.5 8.5l3 3" />
+    </>
+  ),
 }
 
 export default function Icon({ name, size = 24, className, strokeWidth = 2 }) {
