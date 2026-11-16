@@ -1,68 +1,22 @@
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
     """ Базовый класс для всех моделей. """
     pass
-
-
-class User(Base):
-    __tablename__ = "users"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    email: Mapped[str] = mapped_column(
-        String(255),
-        unique=True,
-        index=True
-    )
-    password_hash: Mapped[str] = mapped_column(String(255))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now())
-    role: Mapped[str] = mapped_column(
-        String(20),
-        default="user",
-        server_default="user",
-        nullable=False,
-    )
-
-
-class DonorProfile(Base):
-    __tablename__ = "donor_profiles"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id"),
-        unique=True,
-    )
-    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)
-    blood_group: Mapped[str | None] = mapped_column(
-        String(3),
-        nullable=True,
-    )
-    rh_factor: Mapped[str | None] = mapped_column(
-        String(3),
-        nullable=True,
-    )
-
-
-class Donation(Base):
-    __tablename__ = "donations"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
-    donation_date: Mapped[date] = mapped_column(Date)
-    volume_ml: Mapped[int | None] = mapped_column(
-        Integer,
-        nullable=True,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-    )
 
 
 class Center(Base):
@@ -100,6 +54,69 @@ class Event(Base):
         nullable=True,
     )
     signup_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+
+class DonationRule(Base):
+    __tablename__ = "donation_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    title: Mapped[str] = mapped_column(String(255))
+
+    category: Mapped[str] = mapped_column(String(100))
+
+    content: Mapped[str] = mapped_column(Text)
+
+    source_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    sort_order: Mapped[int] = mapped_column(default=0)
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+
+
+class DonationInterval(Base):
+    __tablename__ = "donation_intervals"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "previous_type",
+            "next_type",
+            "valid_from",
+            name="uq_donation_interval_version",
+        ),
+        CheckConstraint(
+            "days > 0",
+            name="ck_donation_intervals_days_positive",
+        ),
+        CheckConstraint(
+            "valid_to IS NULL OR valid_to >= valid_from",
+            name="ck_donation_intervals_dates",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    previous_type: Mapped[str] = mapped_column(String(50))
+    next_type: Mapped[str] = mapped_column(String(50))
+
+    days: Mapped[int] = mapped_column(Integer)
+
+    valid_from: Mapped[date] = mapped_column(Date)
+    valid_to: Mapped[date | None] = mapped_column(
+        Date,
+        nullable=True,
+    )
+
+    source_url: Mapped[str | None] = mapped_column(
         String(500),
         nullable=True,
     )

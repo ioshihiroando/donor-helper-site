@@ -1,84 +1,73 @@
-import re
 from datetime import date, datetime
-from typing import Literal
 from pydantic import (
     BaseModel,
     Field,
-    EmailStr,
     field_validator,
     ConfigDict,
     model_validator,
 )
+from typing import Annotated
+from urllib.parse import urlsplit
+
+
+def validate_optional_http_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    value = value.strip()
+
+    if not value:
+        return None
+
+    if any(char.isspace() for char in value):
+        raise ValueError("Ссылка не должна содержать пробелы")
+
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        parsed.port
+    except ValueError:
+        raise ValueError("Некорректный URL")
+
+    if (
+        parsed.scheme not in ("http", "https")
+        or not parsed.netloc
+        or not hostname
+    ):
+        raise ValueError(
+            "Ссылка должна начинаться с http:// или https://"
+        )
+
+    return value
 
 
 class CenterCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(min_length=1, max_length=255)
     city: str = Field(default="Москва", max_length=100)
     address: str = Field(min_length=1, max_length=500)
     website_url: str | None = Field(default=None, max_length=500)
 
-
-class DonationCreate(BaseModel):
-    donation_date: date
-    volume_ml: int | None = Field(default=None, ge=1, le=2000)
-
-    @field_validator("donation_date")
+    @field_validator("name", "city", "address")
     @classmethod
-    def validate_donation_date(cls, donation_date: date) -> date:
-        if donation_date > date.today():
-            raise ValueError("Дата донации не может быть в будущем")
-        return donation_date
+    def validate_text(cls, value: str) -> str:
+        value = value.strip()
 
+        if not value:
+            raise ValueError("Поле не может быть пустым")
 
-class UserRegister(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8, max_length=128)
+        return value
 
-    @field_validator("password")
+    @field_validator("website_url")
     @classmethod
-    def validate_password(cls, password: str) -> str:
-        if password.isspace():
-            raise ValueError("Пароль не должен состоять только из пробелов")
-
-        if not re.search(r"[A-Za-zА-Яа-яЁё]", password):
-            raise ValueError("Пароль должен содержать хотя бы одну букву")
-
-        if not re.search(r"\d", password):
-            raise ValueError("Пароль должен содержать хотя бы одну цифру")
-
-        return password
-
-
-class UserLogin(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=1, max_length=128)
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-
-
-class DonorProfileUpdate(BaseModel):
-    birth_date: date | None = None
-    blood_group: Literal["I", "II", "III", "IV"] | None = None
-    rh_factor: Literal["+", "-"] | None = None
-
-    @field_validator("birth_date")
-    @classmethod
-    def validate_birth_date(cls, birth_date: date | None) -> date | None:
-        if birth_date is not None and birth_date > date.today():
-            raise ValueError("Дата рождения не может быть в будущем")
-        return birth_date
-
-
-class DonorProfileResponse(BaseModel):
-    birth_date: date | None
-    blood_group: str | None
-    rh_factor: str | None
+    def validate_website_url(cls, value: str | None) -> str | None:
+        return validate_optional_http_url(value)
 
 
 class EventCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     center_id: int | None = Field(default=None, gt=0)
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
@@ -124,6 +113,11 @@ class EventCreate(BaseModel):
 
         return self
 
+    @field_validator("signup_url")
+    @classmethod
+    def validate_signup_url(cls, value: str | None) -> str | None:
+        return validate_optional_http_url(value)
+
 
 class EventResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -135,3 +129,117 @@ class EventResponse(BaseModel):
     starts_at: datetime
     ends_at: datetime | None
     signup_url: str | None
+
+
+class DonationRuleResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    category: str
+    content: str
+    source_url: str | None
+
+
+class DonationRuleCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(min_length=1, max_length=255)
+    category: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1)
+    source_url: str | None = Field(default=None, max_length=500)
+    sort_order: int = Field(default=0, ge=0)
+    is_active: bool = True
+
+    @field_validator("title", "category", "content")
+    @classmethod
+    def validate_text(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("Поле не может быть пустым")
+
+        return value
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value: str | None) -> str | None:
+        return validate_optional_http_url(value)
+
+
+class DonationRuleAdminResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    category: str
+    content: str
+    source_url: str | None
+    sort_order: int
+    is_active: bool
+
+
+class DonationTypeResponse(BaseModel):
+    code: str
+    name: str
+
+
+class DonationIntervalMatrixResponse(BaseModel):
+    valid_from: date
+    valid_to: date | None
+    source_url: str | None
+    donation_types: list[DonationTypeResponse]
+    matrix: dict[str, dict[str, int]]
+
+
+DONATION_TYPE_CODES = {
+    "whole_blood",
+    "rbc_1_unit",
+    "rbc_2_units",
+    "plasma",
+    "platelets",
+    "granulocytes",
+}
+
+
+class DonationIntervalMatrixCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    valid_from: date
+    valid_to: date | None = None
+    source_url: str | None = Field(default=None, max_length=500)
+
+    matrix: dict[
+        str,
+        dict[str, Annotated[int, Field(strict=True, ge=1)]]
+    ]
+
+    @field_validator("source_url")
+    @classmethod
+    def validate_source_url(cls, value: str | None) -> str | None:
+        return validate_optional_http_url(value)
+
+    @model_validator(mode="after")
+    def validate_matrix(self):
+        if (
+            self.valid_to is not None
+            and self.valid_to < self.valid_from
+        ):
+            raise ValueError(
+                "Дата окончания не может быть раньше даты начала"
+            )
+
+        expected = DONATION_TYPE_CODES
+
+        if set(self.matrix) != expected:
+            raise ValueError(
+                "Матрица должна содержать все 6 видов предыдущей донации"
+            )
+
+        for previous_type, row in self.matrix.items():
+            if set(row) != expected:
+                raise ValueError(
+                    f"Для типа {previous_type} указаны не все виды донаций"
+                )
+
+        return self

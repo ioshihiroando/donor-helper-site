@@ -1,98 +1,43 @@
 import os
-from datetime import datetime, timedelta, timezone
-import jwt
-from pwdlib import PasswordHash
-from fastapi import Depends, HTTPException
-from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
+import secrets
+from pathlib import Path
 
-from app.database import get_db
-from app.models import User
+from dotenv import load_dotenv
+from fastapi import Header, HTTPException
 
 
-password_hasher = PasswordHash.recommended()
+# Загружаем переменные окружения из backend/.env
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_PATH = BASE_DIR / ".env"
+
+load_dotenv(ENV_PATH)
+
+# Получаем административный ключ
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 
 
-def hash_password(password: str) -> str:
-    """Безопасно хеширует пароль пользователя."""
-    return password_hasher.hash(password)
+def require_admin_key(
+    x_admin_key: str | None = Header(
+        default=None,
+        alias="X-Admin-Key",
+    ),
+) -> None:
+    """Проверяет наличие правильного административного ключа."""
 
-
-def verify_password(password: str, password_hash: str) -> bool:
-    """Проверяет пароль по сохранённому хешу."""
-    return password_hasher.verify(password, password_hash)
-
-
-SECRET_KEY = os.getenv("AUTH_SECRET_KEY")
-
-if not SECRET_KEY:
-    raise RuntimeError("AUTH_SECRET_KEY не задана в .env")
-
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
-
-
-def create_access_token(user_id: int) -> str:
-    """Создаёт JWT-токен для пользователя."""
-    now = datetime.now(timezone.utc)
-
-    payload = {
-        "sub": str(user_id),
-        "iat": now,
-        "exp": now + timedelta(
-            minutes=ACCESS_TOKEN_EXPIRE_MINUTES
-        ),
-    }
-
-    return jwt.encode(
-        payload,
-        SECRET_KEY,
-        algorithm=ALGORITHM,
-    )
-
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
-
-
-def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db),
-):
-    """Проверяет токен и возвращает текущего пользователя."""
-
-    try:
-        payload = jwt.decode(
-            token,
-            SECRET_KEY,
-            algorithms=[ALGORITHM],
-        )
-        user_id = int(payload["sub"])
-    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
+    if not ADMIN_API_KEY:
         raise HTTPException(
-            status_code=401,
-            detail="Недействительный токен",
-            headers={"WWW-Authenticate": "Bearer"},
+            status_code=500,
+            detail="ADMIN_API_KEY не настроен на сервере",
         )
 
-    user = db.query(User).filter(User.id == user_id).first()
-
-    if user is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Пользователь не найден",
-            headers={"WWW-Authenticate": "Bearer"},
+    if (
+        x_admin_key is None
+        or not secrets.compare_digest(
+            x_admin_key.encode("utf-8"),
+            ADMIN_API_KEY.encode("utf-8"),
         )
-
-    return user
-
-
-def get_admin_user(
-    current_user: User = Depends(get_current_user),
-) -> User:
-    if current_user.role != "admin":
+    ):
         raise HTTPException(
             status_code=403,
-            detail="Недостаточно прав. Требуются права администратора.",
+            detail="Недостаточно прав администратора",
         )
-
-    return current_user
